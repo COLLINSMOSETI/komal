@@ -1,0 +1,23 @@
+{
+  "name": "komal",
+  "version": "1.0.0",
+  "description": "Komal - a private WhatsApp-style messenger you host yourself",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.2",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.5.0",
+    "web-push": "^3.6.7",
+    "ws": "^8.22.0"
+  }
+}
