@@ -41,17 +41,21 @@ const INVITE = process.env.INVITE === 'off' ? null : (process.env.INVITE || pers
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const GMAIL_USER = process.env.GMAIL_USER || '';
-const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || '';
 const LOGIN_NOTIFY_EMAIL = process.env.LOGIN_NOTIFY_EMAIL || 'moseticollins20@gmail.com';
-const mailer = GMAIL_USER && GMAIL_APP_PASSWORD
-  ? nodemailer.createTransport({ service: 'gmail', auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD } })
-  : null;
+const gmailMimeTransport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
+const gmailConfigured = !!(GMAIL_USER && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN);
+let googleAccessToken = '';
+let googleAccessTokenExpiresAt = 0;
+let googleTokenRequest = null;
 
 if ((SUPABASE_URL || SUPABASE_SERVICE_ROLE_KEY) && !(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)) {
   console.warn('Login tracking is disabled: set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
 }
-if (!mailer) {
-  console.warn('Login email alerts are disabled: set both GMAIL_USER and GMAIL_APP_PASSWORD.');
+if (!gmailConfigured) {
+  console.warn('Login email alerts are disabled: set GMAIL_USER, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN.');
 }
 
 let vapid;
@@ -124,12 +128,51 @@ async function writeLoginEvent(event) {
 
 async function sendLoginEmail(event) {
   const label = event.event_type === 'signup' ? 'New account registered' : 'New login';
-  await mailer.sendMail({
+  const message = await gmailMimeTransport.sendMail({
     from: { name: 'Komal Login Alerts', address: GMAIL_USER },
     to: LOGIN_NOTIFY_EMAIL,
     subject: `[Komal] ${label}: ${event.name}`,
     text: `${label} on Komal\n\nName: ${event.name}\nPhone: ${event.phone}\nTime (UTC): ${event.logged_in_at}`,
   });
+  const accessToken = await getGoogleAccessToken();
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: message.message.toString('base64url') }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Gmail API returned HTTP ${response.status}`);
+}
+
+async function getGoogleAccessToken() {
+  if (googleAccessToken && googleAccessTokenExpiresAt > Date.now() + 60000) return googleAccessToken;
+  if (googleTokenRequest) return googleTokenRequest;
+  googleTokenRequest = (async () => {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        refresh_token: GOOGLE_REFRESH_TOKEN,
+        grant_type: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Google OAuth returned HTTP ${response.status}`);
+    const result = await response.json();
+    if (typeof result.access_token !== 'string' || !result.access_token) {
+      throw new Error('Google OAuth did not return an access token');
+    }
+    googleAccessToken = result.access_token;
+    googleAccessTokenExpiresAt = Date.now() + (Number(result.expires_in) || 3600) * 1000;
+    return googleAccessToken;
+  })();
+  try {
+    return await googleTokenRequest;
+  } finally {
+    googleTokenRequest = null;
+  }
 }
 
 async function reportSuccessfulAuth(user, eventType) {
@@ -142,7 +185,7 @@ async function reportSuccessfulAuth(user, eventType) {
   };
   const tasks = [];
   if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) tasks.push(['Supabase login record', writeLoginEvent(event)]);
-  if (mailer) tasks.push(['login email alert', sendLoginEmail(event)]);
+  if (gmailConfigured) tasks.push(['login email alert', sendLoginEmail(event)]);
   const results = await Promise.allSettled(tasks.map(([, task]) => task));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {

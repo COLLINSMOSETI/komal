@@ -52,7 +52,12 @@ Komal keeps its existing phone-number login. To see successful logins in Supabas
 1. In Supabase, open **SQL Editor** and run [`supabase-login-events.sql`](./supabase-login-events.sql).
 2. Copy `.env.example` to `.env` beside `server.js`. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from your Supabase project's API settings.
    The service-role key is secret and must stay in this server-side `.env` file; never add it to `public/` or share it.
-3. For email alerts, enable 2-Step Verification on the Gmail account you want Komal to send from. Create a Google App Password at https://myaccount.google.com/apppasswords, then set `GMAIL_USER` to that Gmail address and `GMAIL_APP_PASSWORD` to the generated App Password. Do not use your regular Gmail password. Alerts go to `moseticollins20@gmail.com` by default; change `LOGIN_NOTIFY_EMAIL` only if you want a different recipient.
+3. For email alerts without a custom domain or App Password, configure Gmail API OAuth in Google Cloud:
+   - Create a Google Cloud project, enable the **Gmail API**, and configure the OAuth consent screen. Add your Gmail account as a test user if the app is in testing.
+   - Create a **Web application** OAuth client ID and secret, with `https://developers.google.com/oauthplayground` as an authorized redirect URI. In the OAuth Playground settings, enable **Use your own OAuth credentials** and enter that client ID and secret. In the Playground, authorize `https://www.googleapis.com/auth/gmail.send`, exchange the authorization code, and copy the refresh token.
+   - Put the sending Gmail address in `GMAIL_USER`, and the OAuth client ID, client secret, and refresh token in `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN`. Keep all of these values in `.env`; do not commit or share them.
+   - Alerts go to `moseticollins20@gmail.com` by default; change `LOGIN_NOTIFY_EMAIL` only if you want a different recipient. The OAuth token only grants permission to send Gmail messages.
+   - If the OAuth consent screen remains in **Testing**, Google may expire its refresh token after 7 days. For ongoing alerts, publish the consent app; Google may require verification for the Gmail send permission.
 4. Restart Komal. Successful logins and new account registrations appear in Supabase's `login_events` table with the Komal account name, phone number, local account ID, event type, and UTC time; each also sends an email alert.
 
 The Supabase table is not readable by anonymous or signed-in app users. If either integration is not configured or a provider is temporarily unavailable, Komal still allows sign-in and reports the integration failure in the server console.
