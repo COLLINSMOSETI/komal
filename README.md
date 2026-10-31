@@ -52,7 +52,7 @@ Komal keeps its existing phone-number login. To see successful logins in Supabas
 1. In Supabase, open **SQL Editor** and run [`supabase-login-events.sql`](./supabase-login-events.sql).
 2. Copy `.env.example` to `.env` beside `server.js`. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from your Supabase project's API settings.
    The service-role key is secret and must stay in this server-side `.env` file; never add it to `public/` or share it.
-3. Create a Resend API key, verify the sender domain, and set `RESEND_API_KEY`, `LOGIN_NOTIFY_EMAIL` (your inbox), and `LOGIN_NOTIFY_FROM` (the verified sender).
+3. For email alerts, enable 2-Step Verification on the Gmail account you want Komal to send from. Create a Google App Password at https://myaccount.google.com/apppasswords, then set `GMAIL_USER` to that Gmail address and `GMAIL_APP_PASSWORD` to the generated App Password. Do not use your regular Gmail password. Alerts go to `moseticollins20@gmail.com` by default; change `LOGIN_NOTIFY_EMAIL` only if you want a different recipient.
 4. Restart Komal. Successful logins and new account registrations appear in Supabase's `login_events` table with the Komal account name, phone number, local account ID, event type, and UTC time; each also sends an email alert.
 
 The Supabase table is not readable by anonymous or signed-in app users. If either integration is not configured or a provider is temporarily unavailable, Komal still allows sign-in and reports the integration failure in the server console.

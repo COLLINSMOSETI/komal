@@ -14,6 +14,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 const webpush = require('web-push');
 const { WebSocketServer } = require('ws');
 const db = require('./db');
@@ -39,15 +40,18 @@ const JWT_SECRET = persistentSecret('jwt.secret', 48);
 const INVITE = process.env.INVITE === 'off' ? null : (process.env.INVITE || persistentSecret('invite.code', 4));
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const LOGIN_NOTIFY_EMAIL = process.env.LOGIN_NOTIFY_EMAIL || '';
-const LOGIN_NOTIFY_FROM = process.env.LOGIN_NOTIFY_FROM || '';
+const GMAIL_USER = process.env.GMAIL_USER || '';
+const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
+const LOGIN_NOTIFY_EMAIL = process.env.LOGIN_NOTIFY_EMAIL || 'moseticollins20@gmail.com';
+const mailer = GMAIL_USER && GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({ service: 'gmail', auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD } })
+  : null;
 
 if ((SUPABASE_URL || SUPABASE_SERVICE_ROLE_KEY) && !(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)) {
   console.warn('Login tracking is disabled: set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
 }
-if ((RESEND_API_KEY || LOGIN_NOTIFY_EMAIL || LOGIN_NOTIFY_FROM) && !(RESEND_API_KEY && LOGIN_NOTIFY_EMAIL && LOGIN_NOTIFY_FROM)) {
-  console.warn('Login email alerts are disabled: set RESEND_API_KEY, LOGIN_NOTIFY_EMAIL, and LOGIN_NOTIFY_FROM.');
+if (!mailer) {
+  console.warn('Login email alerts are disabled: set both GMAIL_USER and GMAIL_APP_PASSWORD.');
 }
 
 let vapid;
@@ -120,21 +124,12 @@ async function writeLoginEvent(event) {
 
 async function sendLoginEmail(event) {
   const label = event.event_type === 'signup' ? 'New account registered' : 'New login';
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: LOGIN_NOTIFY_FROM,
-      to: [LOGIN_NOTIFY_EMAIL],
-      subject: `[Komal] ${label}: ${event.name}`,
-      text: `${label} on Komal\n\nName: ${event.name}\nPhone: ${event.phone}\nTime (UTC): ${event.logged_in_at}`,
-    }),
-    signal: AbortSignal.timeout(10000),
+  await mailer.sendMail({
+    from: { name: 'Komal Login Alerts', address: GMAIL_USER },
+    to: LOGIN_NOTIFY_EMAIL,
+    subject: `[Komal] ${label}: ${event.name}`,
+    text: `${label} on Komal\n\nName: ${event.name}\nPhone: ${event.phone}\nTime (UTC): ${event.logged_in_at}`,
   });
-  if (!response.ok) throw new Error(`Resend returned HTTP ${response.status}`);
 }
 
 async function reportSuccessfulAuth(user, eventType) {
@@ -147,7 +142,7 @@ async function reportSuccessfulAuth(user, eventType) {
   };
   const tasks = [];
   if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) tasks.push(['Supabase login record', writeLoginEvent(event)]);
-  if (RESEND_API_KEY && LOGIN_NOTIFY_EMAIL && LOGIN_NOTIFY_FROM) tasks.push(['login email alert', sendLoginEmail(event)]);
+  if (mailer) tasks.push(['login email alert', sendLoginEmail(event)]);
   const results = await Promise.allSettled(tasks.map(([, task]) => task));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
