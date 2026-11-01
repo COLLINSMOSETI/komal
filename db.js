@@ -9,6 +9,17 @@ fs.mkdirSync(dir, { recursive: true });
 
 const raw = new DatabaseSync(path.join(dir, 'komal.db'));
 raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
+let changeListener = null;
+let transactionDepth = 0;
+let transactionChanged = false;
+
+function notifyChange() {
+  if (transactionDepth) {
+    transactionChanged = true;
+  } else if (changeListener) {
+    changeListener();
+  }
+}
 
 const db = {
   prepare(sql) {
@@ -19,15 +30,37 @@ const db = {
       pluck() { pluck = true; return api; },
       get(...a) { const r = st.get(...a); return r === undefined ? undefined : pluck ? one(r) : r; },
       all(...a) { const rs = st.all(...a); return pluck ? rs.map(one) : rs; },
-      run(...a) { const i = st.run(...a); return { changes: Number(i.changes), lastInsertRowid: Number(i.lastInsertRowid) }; },
+      run(...a) {
+        const i = st.run(...a);
+        const result = { changes: Number(i.changes), lastInsertRowid: Number(i.lastInsertRowid) };
+        if (result.changes) notifyChange();
+        return result;
+      },
     };
     return api;
   },
   transaction(fn) {
     return (...a) => {
       raw.exec('BEGIN');
-      try { const r = fn(...a); raw.exec('COMMIT'); return r; } catch (e) { raw.exec('ROLLBACK'); throw e; }
+      transactionDepth++;
+      try { const r = fn(...a); raw.exec('COMMIT'); return r; } catch (e) {
+        raw.exec('ROLLBACK');
+        if (transactionDepth === 1) transactionChanged = false;
+        throw e;
+      }
+      finally {
+        transactionDepth--;
+        if (!transactionDepth && transactionChanged) {
+          transactionChanged = false;
+          if (changeListener) changeListener();
+        }
+      }
     };
+  },
+  onChange(fn) { changeListener = fn; },
+  snapshot() {
+    const tables = ['users', 'convs', 'members', 'messages', 'media', 'push_subs'];
+    return Object.fromEntries(tables.map((table) => [table, raw.prepare(`SELECT * FROM ${table}`).all()]));
   },
   close() { raw.close(); },
 };

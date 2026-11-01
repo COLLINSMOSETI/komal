@@ -18,6 +18,7 @@ const nodemailer = require('nodemailer');
 const webpush = require('web-push');
 const { WebSocketServer } = require('ws');
 const db = require('./db');
+const supabaseBackup = require('./supabase-backup');
 
 // ───────────────────────── config & secrets ─────────────────────────
 const PORT = +process.env.PORT || 3000;
@@ -455,6 +456,7 @@ app.use((err, req, res, next) => {
 // ───────────────────────── websocket ─────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+supabaseBackup.start(db);
 
 server.on('upgrade', (req, socket, head) => {
   const url = req.url.split('?')[0];
